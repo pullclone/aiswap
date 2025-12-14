@@ -12,10 +12,10 @@ Once installed, you don't even need to remember the command `aiswap`. You can us
 
 | Command | Profile | Description |
 | :--- | :--- | :--- |
-| **`altostrat`** | `c` | Switches to the **Corporate/Claude** profile. |
-| **`alpha`** | `g` | Switches to the **General/Gemini** profile. |
-| **`lechat`** | `m` | Switches to the **Mega/Mistral** profile. |
-| **`stargate`** | `o` | Switches to the **Omni/OpenAI** profile. |
+| **`altostrat`** | `c` | Switches to the **Claude** profile. |
+| **`alpha`** | `g` | Switches to the **Gemini** profile. |
+| **`lechat`** | `m` | Switches to the **Mistral** profile. |
+| **`stargate`** | `o` | Switches to the **OpenAI** profile. |
 
 Just type the alias and hit enter.
 > `✅ Switched: alpha → stargate`
