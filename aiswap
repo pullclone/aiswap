@@ -1,0 +1,378 @@
+###############################################################################
+# _aichat_swap: Robust profile/configuration swapper for aichat
+#
+# - Portable to Bash 3.2+ (macOS) and POSIX-ish shells
+# - Atomic file operations (mktemp + mv) preventing state corruption
+# - Smart locking with BSD/GNU stat detection & stale lock cleanup
+# - Smart editor detection (code > micro > nano > vim > vi)
+#
+# Usage: _aichat_swap [options] <command|id>
+#   Options:  -n|--dry-run, -v|--verbose
+###############################################################################
+_aichat_swap() {
+    # -------------------------------------------------------------------------
+    # 1. Configuration & Constants
+    # -------------------------------------------------------------------------
+    local VERSION="1.1.0"
+    local BASE_DIR="${AICHAT_CONF_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/aichat}"
+    local DIR="$BASE_DIR"
+    local BACKUP_DIR="$DIR/backups"
+    local LOCK_DIR="$DIR/.swap.lock.d"
+    local CURRENT_FILE="$DIR/current"
+    
+    # Configuration: ID -> Name mapping
+    local IDS=(c g m o)
+    local NAMES=(altostrat alpha lechat stargate)
+    
+    # Internal Flags
+    local DRY_RUN=false
+    local VERBOSE=false
+    local TMPFILE=""
+    local HAVE_LOCK=false
+
+    # -------------------------------------------------------------------------
+    # 2. Helpers
+    # -------------------------------------------------------------------------
+    
+    _msg() {
+        local type="$1"; shift
+        local color=0 out=1 sym=""
+        case "$type" in
+            err)   color=1; out=2; sym="❌ ";;
+            warn)  color=3; out=2; sym="⚠️  ";;
+            ok)    color=2; out=1; sym="✅ ";;
+            info)  color=4; out=1;;
+            dry)   color=5; out=1; sym="🔍 ";;
+        esac
+        if [[ -t $out ]] && command -v tput >/dev/null 2>&1; then
+            printf "%b\n" "$(tput setaf $color)${sym}$*$(tput sgr0)" >&$out
+        else
+            printf "%s\n" "${sym}$*" >&$out
+        fi
+    }
+
+    _exec() {
+        local cmd="$1"; shift
+        if $DRY_RUN || $VERBOSE; then
+            local debug_str="$cmd"
+            local arg
+            for arg in "$@"; do
+                debug_str="$debug_str $(printf "%q" "$arg")"
+            done
+            if $DRY_RUN; then
+                _msg "dry" "[DRY-RUN] $debug_str"
+                return 0
+            else
+                _msg "info" "$debug_str"
+            fi
+        fi
+        "$cmd" "$@"
+    }
+
+    _get_editor() {
+        if [[ -n "$EDITOR" ]]; then echo "$EDITOR"; return; fi
+        # Added 'code' and 'subl' for GUI users who might have them in PATH
+        local editors=(code subl micro nano vim vi)
+        local ed
+        for ed in "${editors[@]}"; do
+            if command -v "$ed" >/dev/null 2>&1; then echo "$ed"; return; fi
+        done
+        if command -v xdg-open >/dev/null; then echo "xdg-open"; return; fi
+        if command -v open >/dev/null; then echo "open"; return; fi
+        echo "cat"
+    }
+
+    _get_name() {
+        local target="$1" i
+        for i in "${!IDS[@]}"; do
+            [[ "${IDS[$i]}" == "$target" ]] && echo "${NAMES[$i]}" && return 0
+        done
+        echo "unknown"
+        return 1
+    }
+
+    _acquire_lock() {
+        local retries=0 max_retries=6  # ~3 seconds
+        local stale_sec=30
+        
+        while (( retries < max_retries )); do
+            if mkdir "$LOCK_DIR" 2>/dev/null; then return 0; fi
+            
+            local mtime=0 now
+            if command -v stat >/dev/null; then
+                # Check syntax against current dir (.) to determine BSD vs GNU
+                if stat -f %m . >/dev/null 2>&1; then 
+                    mtime=$(stat -f %m "$LOCK_DIR" 2>/dev/null || echo 0)
+                else 
+                    mtime=$(stat -c %Y "$LOCK_DIR" 2>/dev/null || echo 0)
+                fi
+            fi
+            
+            now=$(date +%s)
+            # 0 check ensures we don't delete if stat failed
+            if (( mtime > 0 )) && (( now - mtime > stale_sec )); then
+                _msg "warn" "Removing stale lock..."
+                rmdir "$LOCK_DIR" 2>/dev/null
+            else
+                sleep 0.5
+                ((retries++))
+            fi
+        done
+        return 1
+    }
+
+    _cleanup() {
+        if [[ -n "$TMPFILE" && -f "$TMPFILE" ]]; then
+            rm -f "$TMPFILE" 2>/dev/null
+        fi
+        if $HAVE_LOCK; then
+            rmdir "$LOCK_DIR" 2>/dev/null
+        fi
+    }
+
+    _show_help() {
+        # Use FUNCNAME for dynamic naming, fallback to script name
+        local name="${FUNCNAME[0]:-$0}"
+        cat <<EOF
+Usage: $name [options] <command|id>
+
+Options:
+  -n, --dry-run    Preview changes
+  -v, --verbose    Detailed logs
+
+Commands:
+  list, ls         List profiles (* = active)
+  status           Show active profile
+  diff <id>        Compare active config against profile <id>
+  init             Bootstrap configuration directory
+  edit             Edit current config
+  version          Show version
+  help             Show this help
+
+Environment:
+  AICHAT_CONF_DIR  Override config path (Default: ~/.config/aichat)
+
+Profiles:
+EOF
+        local i
+        for i in "${!IDS[@]}"; do printf "  %2s → %-10s\n" "${IDS[$i]}" "${NAMES[$i]}"; done
+    }
+
+    # -------------------------------------------------------------------------
+    # 3. Argument Parsing
+    # -------------------------------------------------------------------------
+    local args=()
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -n|--dry-run) DRY_RUN=true; shift ;;
+            -v|--verbose) VERBOSE=true; shift ;;
+            *) args+=("$1"); shift ;;
+        esac
+    done
+    set -- "${args[@]}"
+
+    local cmd="${1:-status}"
+    cmd=$(printf "%s" "$cmd" | tr '[:upper:]' '[:lower:]')
+
+    # -------------------------------------------------------------------------
+    # 4. Command Handlers
+    # -------------------------------------------------------------------------
+    case "$cmd" in
+        help|--help|-h) _show_help; return 0 ;;
+        version) echo "_aichat_swap v$VERSION"; return 0 ;;
+        
+        init)
+            [[ -d "$DIR" ]] && _msg "warn" "Directory exists: $DIR" || { _exec mkdir -p "$DIR"; _msg "info" "Created $DIR"; }
+            # Ensure backup dir exists too
+            [[ -d "$BACKUP_DIR" ]] || _exec mkdir -p "$BACKUP_DIR"
+            
+            _exec touch "$DIR/config.yaml"
+            local id
+            for id in "${IDS[@]}"; do
+                [[ -f "$DIR/$id.config.yaml" ]] || _exec touch "$DIR/$id.config.yaml"
+            done
+            _msg "ok" "Init complete."
+            return 0 ;;
+            
+        diff)
+            local target_id="$2"
+            [[ -z "$target_id" ]] && { _msg "err" "Usage: diff <profile_id>"; return 1; }
+            if ! command -v diff >/dev/null; then _msg "err" "'diff' command not found."; return 1; fi
+            
+            # Detect color support for diff (GNU vs BSD)
+            local diff_opts=(-u)
+            if diff --color=auto /dev/null /dev/null >/dev/null 2>&1; then
+                diff_opts+=("--color=auto")
+            fi
+            
+            if [[ ! -f "$DIR/$target_id.config.yaml" ]]; then _msg "err" "Profile '$target_id' not found."; return 1; fi
+            diff "${diff_opts[@]}" "$DIR/config.yaml" "$DIR/$target_id.config.yaml"
+            return 0 ;;
+    esac
+
+    if [[ ! -d "$DIR" ]]; then
+        _msg "err" "Directory '$DIR' not found."
+        _msg "info" "Run '_aichat_swap init' to create it."
+        return 1
+    fi
+
+    # Read Current State (Safe read: head -n 1)
+    local current_id=""
+    if [[ -f "$CURRENT_FILE" ]]; then
+        current_id=$(head -n 1 "$CURRENT_FILE" 2>/dev/null | tr -cd '[:alnum:]')
+    fi
+
+    case "$cmd" in
+        list|ls)
+            echo "Available Profiles:"
+            local i
+            for i in "${!IDS[@]}"; do
+                local id="${IDS[$i]}" mark="  "
+                [[ "$id" == "$current_id" ]] && mark="* "
+                printf "%s[%s] %s\n" "$mark" "$id" "${NAMES[$i]}"
+            done
+            return 0 ;;
+            
+        status)
+            if [[ -n "$current_id" ]]; then
+                local name; name=$(_get_name "$current_id") || name="unknown"
+                _msg "info" "Active: $name [$current_id]"
+            else
+                _msg "warn" "No active profile tracked."
+            fi
+            return 0 ;;
+            
+        edit)
+            local editor=$(_get_editor)
+            [[ -f "$DIR/config.yaml" ]] || _exec touch "$DIR/config.yaml"
+            if $DRY_RUN; then
+                _msg "dry" "Would open $DIR/config.yaml with $editor"
+            else
+                "$editor" "$DIR/config.yaml"
+            fi
+            return 0 ;;
+    esac
+
+    # -------------------------------------------------------------------------
+    # 5. Swap Logic
+    # -------------------------------------------------------------------------
+    local target="$cmd"
+    local valid_target=false i
+    for i in "${!IDS[@]}"; do [[ "$target" == "${IDS[$i]}" ]] && valid_target=true && break; done
+    
+    if ! $valid_target; then
+        _msg "err" "Unknown profile or command: '$target'"
+        _msg "info" "Use 'list' to see options."
+        return 1
+    fi
+
+    if ! $DRY_RUN; then
+        if _acquire_lock; then
+            HAVE_LOCK=true
+            trap '_cleanup' EXIT INT TERM
+        else
+            _msg "err" "Could not acquire lock (busy?)."
+            return 1
+        fi
+    fi
+
+    # Idempotency Check
+    if [[ "$current_id" == "$target" ]]; then
+        _msg "ok" "Profile [$target] already active."
+        if ! $DRY_RUN; then trap - EXIT INT TERM; _cleanup; fi
+        return 0
+    fi
+
+    # Unknown State Deduction
+    if [[ -z "$current_id" ]] && [[ -f "$DIR/config.yaml" ]]; then
+        _msg "warn" "Unknown state. Fingerprinting..."
+        local id match_id=""
+        for id in "${IDS[@]}"; do
+            if cmp -s "$DIR/config.yaml" "$DIR/$id.config.yaml" 2>/dev/null; then
+                match_id="$id"; break
+            fi
+        done
+        
+        if [[ -n "$match_id" ]]; then
+            current_id="$match_id"
+            if ! $DRY_RUN; then 
+                printf "%s" "$current_id" > "$CURRENT_FILE.tmp"
+                mv "$CURRENT_FILE.tmp" "$CURRENT_FILE"
+            fi
+        else
+            local ts; ts=$(date +%Y%m%d_%H%M%S)
+            _msg "warn" "No match found. Backing up..."
+            _exec mkdir -p "$BACKUP_DIR"
+            _exec cp -p "$DIR/config.yaml" "$BACKUP_DIR/unknown_$ts.yaml"
+            
+            if [[ -d "$BACKUP_DIR" ]]; then
+                if $DRY_RUN; then _msg "dry" "Would prune backups > 7 days"; 
+                else find "$BACKUP_DIR" -type f -mtime +7 -delete 2>/dev/null; fi
+            fi
+        fi
+    fi
+
+    # Save Current -> Storage
+    if [[ -n "$current_id" ]]; then
+        local storage_file="$DIR/$current_id.config.yaml"
+        # Only copy if different or missing
+        if ! cmp -s "$DIR/config.yaml" "$storage_file" 2>/dev/null; then
+            if ! _exec cp -p "$DIR/config.yaml" "$storage_file"; then
+                _msg "err" "Failed to save current profile."
+                return 1
+            fi
+        fi
+    fi
+
+    # Prepare Swap (Atomic w/ mktemp)
+    local src="$DIR/$target.config.yaml"
+    if [[ ! -f "$src" ]]; then
+        _msg "err" "Target profile missing: $src"
+        return 1
+    fi
+
+    if ! $DRY_RUN; then
+        TMPFILE=$(mktemp "$DIR/.config.yaml.tmp.XXXXXX") || {
+            _msg "err" "Failed to create temp file."
+            return 1
+        }
+    else
+        TMPFILE="$DIR/.config.yaml.tmp.dryrun"
+    fi
+
+    if ! _exec cp -p "$src" "$TMPFILE"; then
+         _msg "err" "Failed to prepare new config."
+         return 1
+    fi
+    
+    if ! _exec mv "$TMPFILE" "$DIR/config.yaml"; then
+        _msg "err" "Failed to activate new config."
+        return 1
+    fi
+    if ! $DRY_RUN; then TMPFILE=""; fi
+
+    # Update Tracking (Atomic)
+    if ! $DRY_RUN; then
+        printf "%s" "$target" > "$CURRENT_FILE.tmp"
+        mv "$CURRENT_FILE.tmp" "$CURRENT_FILE"
+    else
+        _msg "dry" "Would update 'current' to $target"
+    fi
+
+    local final_name; final_name=$(_get_name "$target") || final_name="unknown"
+    _msg "ok" "Switched: ${current_id:-unknown} → $final_name"
+    
+    if ! $DRY_RUN; then trap - EXIT INT TERM; _cleanup; fi
+    return 0
+}
+
+###############################################################################
+# Aliases
+###############################################################################
+if [[ $- == *i* ]]; then
+    alias altostrat='_aichat_swap c'
+    alias alpha='_aichat_swap g'
+    alias lechat='_aichat_swap m'
+    alias stargate='_aichat_swap o'
+    alias aiswap='_aichat_swap'
+fi
