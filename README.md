@@ -67,8 +67,8 @@ Your files live here:
 > `~/.config/aichat/` (or your XDG config path)
 
 *   `config.yaml` (The active file used by the program)
-*   `c.config.yaml` (Stored Corporate profile)
-*   `g.config.yaml` (Stored General profile)
+*   `c.config.yaml` (Stored Claude profile)
+*   `g.config.yaml` (Stored Gemini profile)
 *   ...and so on.
 
 ---
