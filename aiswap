@@ -9,6 +9,7 @@
 # Usage: _aichat_swap [options] <command|id>
 #   Options:  -n|--dry-run, -v|--verbose
 ###############################################################################
+
 _aichat_swap() {
     # -------------------------------------------------------------------------
     # 1. Configuration & Constants
