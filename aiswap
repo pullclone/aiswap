@@ -21,8 +21,8 @@ _aichat_swap() {
     local CURRENT_FILE="$DIR/current"
     
     # Configuration: ID -> Name mapping
-    local IDS=(c g m o)
-    local NAMES=(altostrat alpha lechat stargate)
+    local IDS=(c g m o r)
+    local NAMES=(altostrat alpha lechat stargate openrouter)
     
     # Internal Flags
     local DRY_RUN=false
@@ -374,5 +374,6 @@ if [[ $- == *i* ]]; then
     alias alpha='_aichat_swap g'
     alias lechat='_aichat_swap m'
     alias stargate='_aichat_swap o'
+    alias opnrtr='_aichat_swap r'
     alias aiswap='_aichat_swap'
 fi
