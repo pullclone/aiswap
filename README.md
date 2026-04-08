@@ -21,7 +21,7 @@ aiswap c
 aiswap g
 aiswap m
 aiswap o
-```
+````
 
 Or—more ergonomically—via aliases:
 
@@ -103,19 +103,14 @@ Aliases are automatically loaded:
 
 ### Managing State
 
-* **`aiswap status`**
+* **`aiswap status` / `aiswap -s`**
   Show the active profile.
 
-* **`aiswap list`**
+* **`aiswap list` / `aiswap -l`**
   List all profiles (`*` = active).
 
-* **`aiswap diff <id>`**
+* **`aiswap diff <id>` / `aiswap -d <id>`**
   Compare current config vs another profile.
-  Example:
-
-  ```bash
-  aiswap diff c
-  ```
 
 ---
 
@@ -126,7 +121,7 @@ Aliases are automatically loaded:
 
 * **`aiswap edit`**
   Open active config in your preferred editor
-  (auto-detected: `code → subl → micro → nano → vim → vi`)
+  (`code → subl → micro → nano → vim → vi`)
 
 ---
 
@@ -161,8 +156,8 @@ Aliases are automatically loaded:
 Example:
 
 ```bash
-aiswap -n g   # preview switch
-aiswap -v c   # verbose output
+aiswap -n g
+aiswap -v c
 ```
 
 ---
@@ -175,9 +170,10 @@ aiswap -v c   # verbose output
 
 All writes use `mktemp + mv` to ensure consistency.
 
-### 2. Auto-Save
+### 2. Controlled State Persistence
 
-Modified configs are saved back to their profile before switching.
+Profile state is atomically swapped.
+Explicit persistence guarantees may be expanded in future versions.
 
 ### 3. Locking
 
@@ -185,7 +181,7 @@ Prevents concurrent swaps using a lock directory with stale cleanup.
 
 ### 4. Smart Recovery
 
-If state tracking is missing, aiswap fingerprints configs to recover identity.
+If state tracking is missing, aiswap can recover safely using existing state.
 
 ### 5. Backup System
 
@@ -195,22 +191,20 @@ Unknown states are preserved in:
 ~/.config/aichat/backups/
 ```
 
-Old backups are automatically pruned.
-
 ---
 
 ## 📂 Configuration Layout
 
 ```
 ~/.config/aichat/
-├── config.yaml          # Active config
-├── c.config.yaml        # Claude profile
-├── g.config.yaml        # Gemini profile
-├── m.config.yaml        # Mistral profile
-├── o.config.yaml        # OpenAI profile
-├── aliases              # Alias definitions
-├── current              # Active profile tracker
-└── backups/             # Safety snapshots
+├── config.yaml
+├── c.config.yaml
+├── g.config.yaml
+├── m.config.yaml
+├── o.config.yaml
+├── aliases
+├── current
+└── backups/
 ```
 
 ---
@@ -228,13 +222,9 @@ g alpha
 o stargate
 ```
 
-> Note: Alias definitions are treated as trusted input. Profile IDs are not strictly validated.
-
 ---
 
 ## ⚙️ Shell Integration
-
-Add this to your `.bashrc`:
 
 ```bash
 if [[ $- == *i* ]]; then
@@ -242,13 +232,9 @@ if [[ $- == *i* ]]; then
 fi
 ```
 
-This ensures aliases are automatically loaded every session.
-
 ---
 
 ## 🧩 Design Philosophy
-
-**aiswap** separates concerns cleanly:
 
 | Layer    | Responsibility      |
 | -------- | ------------------- |
@@ -256,42 +242,31 @@ This ensures aliases are automatically loaded every session.
 | Aliases  | User interface      |
 | aiswap   | Orchestration       |
 
-This enables:
-
-* Portable setups
-* Declarative configuration
-* Extensible workflows
-
 ---
 
 ## ❤️ Built for aichat
 
-Designed to pair seamlessly with:
+Designed to pair with:
 
 👉 [https://github.com/sigoden/aichat](https://github.com/sigoden/aichat)
-
-**aiswap** respects native `aichat` config structure while adding:
-
-* Fast profile switching
-* Safe state management
-* Flexible interface control
 
 ---
 
 ## ⚠️ Disclaimer
 
-**aiswap** is an independent community project.
-It is not affiliated with or endorsed by the creators of aichat.
-
----
+Independent project. Not affiliated with aichat.
 
 ## 🧭 Project Status
 
-**aiswap v1.2.1** is stable and feature-complete for local profile management.
+**aiswap v1.2.2**
 
-Future work (planned):
+Stable for:
+
+* Local profile switching
+* Alias-driven workflows
+
+Planned:
 
 * Cross-machine sync
-* Remote state reconciliation
-* Profile validation layer
-* Extended provider abstraction
+* Remote reconciliation
+* Validation layer

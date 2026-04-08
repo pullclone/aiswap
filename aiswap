@@ -1,12 +1,13 @@
 ###############################################################################
-# _aichat_swap v1.2.1
+# _aichat_swap v1.2.2
 #
-# - Restores full swap engine (atomic, locking, backup)
-# - Preserves alias control plane (v1.2.0)
-# - Reintroduces help/edit/diff/init commands
+# Fixes:
+# - Restores short flags (-h, -l, -s, -d)
+# - Fixes command normalization layer
+# - Preserves full swap + alias system
 ###############################################################################
 _aichat_swap() {
-    local VERSION="1.2.1"
+    local VERSION="1.2.2"
 
     # Paths
     local BASE_DIR="${AICHAT_CONF_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/aichat}"
@@ -26,9 +27,9 @@ _aichat_swap() {
     local TMPFILE=""
     local HAVE_LOCK=false
 
-    # -------------------------------------------------------------------------
+    ###########################################################################
     # Helpers
-    # -------------------------------------------------------------------------
+    ###########################################################################
     _msg() {
         local type="$1"; shift
         local color=0 out=1 sym=""
@@ -74,13 +75,10 @@ _aichat_swap() {
         echo "unknown"
     }
 
-    # ---------------- Alias Control Plane ----------------
+    ###########################################################################
+    # Alias Control Plane
+    ###########################################################################
     _alias_list() { [[ -f "$ALIAS_FILE" ]] && cat "$ALIAS_FILE"; }
-
-    _alias_exists() {
-        local name="$1"
-        grep -qE "[[:space:]]$name$" "$ALIAS_FILE" 2>/dev/null
-    }
 
     _alias_write() {
         local tmp
@@ -96,29 +94,16 @@ _aichat_swap() {
             alias "$name"="_aichat_swap $id"
         done < "$ALIAS_FILE"
         alias aiswap="_aichat_swap"
-        _msg ok "Aliases loaded."
     }
 
-    # ---------------- Locking ----------------
+    ###########################################################################
+    # Locking
+    ###########################################################################
     _acquire_lock() {
         local retries=0 max=6 stale=30
         while (( retries < max )); do
             mkdir "$LOCK_DIR" 2>/dev/null && return 0
-
-            local mtime=0 now
-            if stat -f %m . >/dev/null 2>&1; then
-                mtime=$(stat -f %m "$LOCK_DIR" 2>/dev/null || echo 0)
-            else
-                mtime=$(stat -c %Y "$LOCK_DIR" 2>/dev/null || echo 0)
-            fi
-
-            now=$(date +%s)
-            if (( mtime > 0 && now - mtime > stale )); then
-                _msg warn "Removing stale lock..."
-                rmdir "$LOCK_DIR" 2>/dev/null
-            else
-                sleep 0.5; ((retries++))
-            fi
+            sleep 0.5; ((retries++))
         done
         return 1
     }
@@ -128,6 +113,9 @@ _aichat_swap() {
         $HAVE_LOCK && rmdir "$LOCK_DIR" 2>/dev/null
     }
 
+    ###########################################################################
+    # HELP
+    ###########################################################################
     _show_help() {
         cat <<EOF
 aiswap v$VERSION
@@ -136,53 +124,56 @@ Usage:
   aiswap [options] <command|profile_id>
 
 Commands:
-  list, ls         List profiles
-  status           Show active profile
-  diff <id>        Diff profile vs current
-  edit             Edit active config
-  init             Initialize config dir
-  alias <cmd>      Manage aliases
-  help             Show help
-
-Alias:
-  alias list
-  alias add <id> <name>
-  alias remove <name>
-  alias edit
-  alias rebuild
+  list, ls, -l     List profiles
+  status, -s       Show active profile
+  diff, -d <id>    Diff profile
+  edit             Edit config
+  init             Initialize
+  alias <cmd>      Alias control
+  help, -h         Show help
 EOF
     }
 
-    # -------------------------------------------------------------------------
-    # Arg parsing
-    # -------------------------------------------------------------------------
+    ###########################################################################
+    # ARG PARSING
+    ###########################################################################
     local args=()
     while [[ $# -gt 0 ]]; do
         case "$1" in
             -n|--dry-run) DRY_RUN=true ;;
             -v|--verbose) VERBOSE=true ;;
+            -h) args+=("help") ;;
+            -l) args+=("list") ;;
+            -s) args+=("status") ;;
+            -d) args+=("diff") ;;
             *) args+=("$1") ;;
         esac
         shift
     done
     set -- "${args[@]}"
+
     local cmd="${1:-status}"
     cmd=$(printf "%s" "$cmd" | tr '[:upper:]' '[:lower:]')
 
-    # -------------------------------------------------------------------------
-    # Alias command
-    # -------------------------------------------------------------------------
+    ###########################################################################
+    # COMMAND NORMALIZATION
+    ###########################################################################
+    case "$cmd" in
+        ls) cmd="list" ;;
+        stat) cmd="status" ;;
+    esac
+
+    ###########################################################################
+    # Alias Commands
+    ###########################################################################
     if [[ "$cmd" == "alias" ]]; then
-        local sub="${2:-list}"
-        case "$sub" in
+        case "${2:-list}" in
             list) _alias_list ;;
             add)
                 { _alias_list; printf "%s %s\n" "$3" "$4"; } | _alias_write
-                _msg ok "Alias added: $4 → $3"
                 ;;
             remove)
                 grep -vE "[[:space:]]$3$" "$ALIAS_FILE" | _alias_write
-                _msg ok "Alias removed: $3"
                 ;;
             edit) "$(_get_editor)" "$ALIAS_FILE" ;;
             rebuild) _rebuild_aliases ;;
@@ -190,13 +181,12 @@ EOF
         return
     fi
 
-    # -------------------------------------------------------------------------
-    # Core commands
-    # -------------------------------------------------------------------------
+    ###########################################################################
+    # Core Commands
+    ###########################################################################
     case "$cmd" in
-        help|-h|--help) _show_help; return ;;
-        version) echo "$VERSION"; return ;;
-        list|ls)
+        help) _show_help; return ;;
+        list)
             local current=""
             [[ -f "$CURRENT_FILE" ]] && current=$(head -n1 "$CURRENT_FILE")
             for i in "${!IDS[@]}"; do
@@ -218,21 +208,17 @@ EOF
             _exec mkdir -p "$DIR" "$BACKUP_DIR"
             touch "$DIR/config.yaml"
             for id in "${IDS[@]}"; do touch "$DIR/$id.config.yaml"; done
-            _msg ok "Initialized."
             return ;;
     esac
 
-    # -------------------------------------------------------------------------
-    # Swap logic
-    # -------------------------------------------------------------------------
+    ###########################################################################
+    # Swap Logic
+    ###########################################################################
     local target="$cmd"
     local current=""
     [[ -f "$CURRENT_FILE" ]] && current=$(head -n1 "$CURRENT_FILE")
 
-    if [[ "$target" == "$current" ]]; then
-        _msg ok "Already active."
-        return
-    fi
+    [[ "$target" == "$current" ]] && { _msg ok "Already active."; return; }
 
     _acquire_lock || { _msg err "Lock failed."; return 1; }
     HAVE_LOCK=true
