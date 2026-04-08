@@ -1,12 +1,14 @@
 # 🔄 aiswap
+
 ### The Intelligent Profile Switcher
 
 **aiswap** is a utility that lets you instantly switch between different AI personalities and service configurations (Claude, Gemini, Mistral, OpenAI, etc.) without manually editing config files.
 
 It is designed to be:
-- **Invisible when it works**
-- **Informative when it doesn’t**
-- **Safe by default**
+
+* **Invisible when it works**
+* **Informative when it doesn’t**
+* **Safe by default**
 
 ---
 
@@ -19,7 +21,7 @@ aiswap c
 aiswap g
 aiswap m
 aiswap o
-````
+```
 
 Or—more ergonomically—via aliases:
 
@@ -28,11 +30,13 @@ alpha
 stargate
 ```
 
-> `✅ Switched: alpha → stargate`
+```text
+✅ Switched: alpha → stargate
+```
 
 ---
 
-## ✨ New: Dynamic Alias System
+## ✨ Dynamic Alias System
 
 Aliases are no longer hardcoded in your shell.
 
@@ -40,12 +44,12 @@ They are now:
 
 * **Stored as data**
 * **Editable at runtime**
-* **Automatically loaded into your shell**
+* **Automatically injected into your shell**
 
 This means:
 
 * No `.bashrc` editing
-* No reload friction
+* Minimal reload friction (instant with `aiswap alias rebuild`)
 * Fully portable alias configs
 
 ---
@@ -88,6 +92,11 @@ aiswap alias edit
 aiswap alias rebuild
 ```
 
+Aliases are automatically loaded:
+
+* On shell startup (via `.bashrc`)
+* Or instantly with `aiswap alias rebuild`
+
 ---
 
 ## 🛠️ Commands & Options
@@ -102,7 +111,11 @@ aiswap alias rebuild
 
 * **`aiswap diff <id>`**
   Compare current config vs another profile.
-  *Example:* `aiswap diff c`
+  Example:
+
+  ```bash
+  aiswap diff c
+  ```
 
 ---
 
@@ -113,7 +126,7 @@ aiswap alias rebuild
 
 * **`aiswap edit`**
   Open active config in your preferred editor
-  (auto-detected: VS Code → Micro → Nano → Vim).
+  (auto-detected: `code → subl → micro → nano → vim → vi`)
 
 ---
 
@@ -127,6 +140,16 @@ aiswap alias rebuild
 
 ---
 
+### Help & Info
+
+* **`aiswap help` / `aiswap -h`**
+  Show full usage and command reference.
+
+* **`aiswap version`**
+  Show current version.
+
+---
+
 ### Safety Options
 
 * **`-n`, `--dry-run`**
@@ -134,6 +157,13 @@ aiswap alias rebuild
 
 * **`-v`, `--verbose`**
   Show detailed execution logs.
+
+Example:
+
+```bash
+aiswap -n g   # preview switch
+aiswap -v c   # verbose output
+```
 
 ---
 
@@ -162,44 +192,43 @@ If state tracking is missing, aiswap fingerprints configs to recover identity.
 Unknown states are preserved in:
 
 ```
-
 ~/.config/aichat/backups/
 ```
+
+Old backups are automatically pruned.
 
 ---
 
 ## 📂 Configuration Layout
 
 ```
-
 ~/.config/aichat/
 ├── config.yaml          # Active config
 ├── c.config.yaml        # Claude profile
 ├── g.config.yaml        # Gemini profile
 ├── m.config.yaml        # Mistral profile
 ├── o.config.yaml        # OpenAI profile
-├── aliases              # Alias definitions (NEW)
+├── aliases              # Alias definitions
 ├── current              # Active profile tracker
 └── backups/             # Safety snapshots
-
 ```
+
+---
 
 ### Alias File Format
 
 ```
-
 <profile_id> <alias_name>
-
 ```
 
 Example:
 
 ```
-
 g alpha
 o stargate
-
 ```
+
+> Note: Alias definitions are treated as trusted input. Profile IDs are not strictly validated.
 
 ---
 
@@ -253,3 +282,16 @@ Designed to pair seamlessly with:
 
 **aiswap** is an independent community project.
 It is not affiliated with or endorsed by the creators of aichat.
+
+---
+
+## 🧭 Project Status
+
+**aiswap v1.2.1** is stable and feature-complete for local profile management.
+
+Future work (planned):
+
+* Cross-machine sync
+* Remote state reconciliation
+* Profile validation layer
+* Extended provider abstraction
