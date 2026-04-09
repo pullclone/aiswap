@@ -1,13 +1,15 @@
 ###############################################################################
-# _aichat_swap v1.2.2
+# _aichat_swap v1.2.3 (MU/TH/UR Integrated)
 #
-# Fixes:
-# - Restores short flags (-h, -l, -s, -d)
-# - Fixes command normalization layer
-# - Preserves full swap + alias system
+# Fixes & Features:
+# - Restores cross-platform robust stale lock detection (mtime-based)
+# - Fixes critical alias bootstrap bug (always sets `aiswap` and defaults)
+# - Restores config fingerprinting and auto-backup from v1.1.0
+# - Maintains v1.2.2 short flags and dynamic alias control plane
+# - Ensures 100% atomic swaps with mktemp + mv
 ###############################################################################
 _aichat_swap() {
-    local VERSION="1.2.2"
+    local VERSION="1.2.3"
 
     # Paths
     local BASE_DIR="${AICHAT_CONF_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/aichat}"
@@ -17,7 +19,7 @@ _aichat_swap() {
     local CURRENT_FILE="$DIR/current"
     local ALIAS_FILE="$DIR/aliases"
 
-    # Profiles
+    # Profiles (Defaults)
     local IDS=(c g m o)
     local NAMES=(altostrat alpha lechat stargate)
 
@@ -62,7 +64,7 @@ _aichat_swap() {
         [[ -n "$EDITOR" ]] && { echo "$EDITOR"; return; }
         local editors=(code subl micro nano vim vi)
         for ed in "${editors[@]}"; do
-            command -v "$ed" >/dev/null && { echo "$ed"; return; }
+            command -v "$ed" >/dev/null 2>&1 && { echo "$ed"; return; }
         done
         echo "vi"
     }
@@ -88,28 +90,61 @@ _aichat_swap() {
     }
 
     _rebuild_aliases() {
-        [[ -f "$ALIAS_FILE" ]] || return
-        while read -r id name; do
-            [[ -z "$id" || -z "$name" ]] && continue
-            alias "$name"="_aichat_swap $id"
-        done < "$ALIAS_FILE"
+        # 1. Base command must ALWAYS exist
         alias aiswap="_aichat_swap"
+
+        # 2. Map dynamic aliases
+        if [[ -f "$ALIAS_FILE" ]]; then
+            while read -r id name; do
+                [[ -z "$id" || -z "$name" ]] && continue
+                alias "$name"="_aichat_swap $id"
+            done < "$ALIAS_FILE"
+        else
+            # 3. Fallback to defaults if file isn't initialized yet
+            local i
+            for i in "${!IDS[@]}"; do
+                alias "${NAMES[$i]}"="_aichat_swap ${IDS[$i]}"
+            done
+        fi
     }
 
     ###########################################################################
-    # Locking
+    # Locking (Restored from 1.1.0 / Hardened)
     ###########################################################################
     _acquire_lock() {
+        # Ensure base directory exists first so mkdir lock doesn't fail
+        mkdir -p "$DIR" 2>/dev/null
+
         local retries=0 max=6 stale=30
         while (( retries < max )); do
-            mkdir "$LOCK_DIR" 2>/dev/null && return 0
-            sleep 0.5; ((retries++))
+            if mkdir "$LOCK_DIR" 2>/dev/null; then
+                return 0
+            fi
+
+            # Check for stale lock
+            local now mtime=0
+            now=$(date +%s)
+
+            if stat -c %Y "$LOCK_DIR" >/dev/null 2>&1; then
+                mtime=$(stat -c %Y "$LOCK_DIR")
+            elif stat -f %m "$LOCK_DIR" >/dev/null 2>&1; then
+                mtime=$(stat -f %m "$LOCK_DIR")
+            fi
+
+            if (( mtime > 0 && now - mtime > stale )); then
+                _msg warn "Stale lock detected — reclaiming"
+                rmdir "$LOCK_DIR" 2>/dev/null
+                continue
+            fi
+
+            sleep 0.5
+            ((retries++))
         done
         return 1
     }
 
     _cleanup() {
-        [[ -n "$TMPFILE" && -f "$TMPFILE" ]] && rm -f "$TMPFILE"
+        [[ -n "$TMPFILE" && -f "$TMPFILE" ]] && rm -f "$TMPFILE" 2>/dev/null
         $HAVE_LOCK && rmdir "$LOCK_DIR" 2>/dev/null
     }
 
@@ -171,9 +206,11 @@ EOF
             list) _alias_list ;;
             add)
                 { _alias_list; printf "%s %s\n" "$3" "$4"; } | _alias_write
+                _msg ok "Alias added: $4 → $3"
                 ;;
             remove)
                 grep -vE "[[:space:]]$3$" "$ALIAS_FILE" | _alias_write
+                _msg ok "Alias removed: $3"
                 ;;
             edit) "$(_get_editor)" "$ALIAS_FILE" ;;
             rebuild) _rebuild_aliases ;;
@@ -188,7 +225,7 @@ EOF
         help) _show_help; return ;;
         list)
             local current=""
-            [[ -f "$CURRENT_FILE" ]] && current=$(head -n1 "$CURRENT_FILE")
+            [[ -f "$CURRENT_FILE" ]] && current=$(head -n1 "$CURRENT_FILE" 2>/dev/null | tr -cd '[:alnum:]')
             for i in "${!IDS[@]}"; do
                 local mark=" "
                 [[ "${IDS[$i]}" == "$current" ]] && mark="*"
@@ -208,27 +245,84 @@ EOF
             _exec mkdir -p "$DIR" "$BACKUP_DIR"
             touch "$DIR/config.yaml"
             for id in "${IDS[@]}"; do touch "$DIR/$id.config.yaml"; done
+            _msg ok "Initialization complete."
             return ;;
     esac
 
     ###########################################################################
-    # Swap Logic
+    # Swap Logic (Restored to 1.1.0 Standards)
     ###########################################################################
     local target="$cmd"
     local current=""
-    [[ -f "$CURRENT_FILE" ]] && current=$(head -n1 "$CURRENT_FILE")
+    [[ -f "$CURRENT_FILE" ]] && current=$(head -n1 "$CURRENT_FILE" 2>/dev/null | tr -cd '[:alnum:]')
 
-    [[ "$target" == "$current" ]] && { _msg ok "Already active."; return; }
+    local valid_target=false i
+    for i in "${!IDS[@]}"; do [[ "$target" == "${IDS[$i]}" ]] && valid_target=true && break; done
 
-    _acquire_lock || { _msg err "Lock failed."; return 1; }
+    if ! $valid_target; then
+        _msg err "Unknown profile or command: '$target'"
+        _msg info "Use 'list' to see options."
+        return 1
+    fi
+
+    if [[ "$target" == "$current" ]]; then
+        _msg ok "Profile [$target] already active."
+        return 0
+    fi
+
+    # Dry-run hard stop to prevent actual mutation
+    if $DRY_RUN; then
+        _msg dry "Would lock, save current state, and swap to: $(_get_name "$target") ($target)"
+        return 0
+    fi
+
+    _acquire_lock || { _msg err "Lock failed (busy?)."; return 1; }
     HAVE_LOCK=true
-    trap '_cleanup' EXIT
+    trap '_cleanup' EXIT INT TERM
 
+    # ---------------------------------------------------------
+    # State Deduction & Backup (Restored from v1.1.0)
+    # ---------------------------------------------------------
+    if [[ -z "$current" ]] && [[ -f "$DIR/config.yaml" ]]; then
+        _msg warn "Unknown state. Fingerprinting..."
+        local id match_id=""
+        for id in "${IDS[@]}"; do
+            if cmp -s "$DIR/config.yaml" "$DIR/$id.config.yaml" 2>/dev/null; then
+                match_id="$id"; break
+            fi
+        done
+        
+        if [[ -n "$match_id" ]]; then
+            current="$match_id"
+            echo "$current" > "$CURRENT_FILE"
+        else
+            local ts; ts=$(date +%Y%m%d_%H%M%S)
+            _msg warn "No match found. Backing up active config..."
+            mkdir -p "$BACKUP_DIR" 2>/dev/null
+            cp -p "$DIR/config.yaml" "$BACKUP_DIR/unknown_$ts.yaml" 2>/dev/null
+            find "$BACKUP_DIR" -type f -mtime +7 -delete 2>/dev/null
+        fi
+    fi
+
+    # Save Current to Storage before swapping (In case of manual edits)
+    if [[ -n "$current" ]]; then
+        local storage_file="$DIR/$current.config.yaml"
+        if ! cmp -s "$DIR/config.yaml" "$storage_file" 2>/dev/null; then
+            cp -p "$DIR/config.yaml" "$storage_file" 2>/dev/null
+        fi
+    fi
+
+    # ---------------------------------------------------------
+    # Perform Atomic Swap
+    # ---------------------------------------------------------
     local src="$DIR/$target.config.yaml"
-    [[ ! -f "$src" ]] && { _msg err "Missing profile."; return 1; }
+    if [[ ! -f "$src" ]]; then
+        _msg err "Missing profile: $src"
+        return 1
+    fi
 
     TMPFILE=$(mktemp "$DIR/.tmp.XXXXXX") || return 1
-    cp "$src" "$TMPFILE"
+    cp -p "$src" "$TMPFILE"
     mv "$TMPFILE" "$DIR/config.yaml"
     echo "$target" > "$CURRENT_FILE"
 
