@@ -21,7 +21,7 @@ aiswap c
 aiswap g
 aiswap m
 aiswap o
-````
+```
 
 Or—more ergonomically—via aliases:
 
@@ -45,6 +45,7 @@ They are now:
 * **Stored as data**
 * **Editable at runtime**
 * **Automatically injected into your shell**
+* **Guaranteed to load** (Default profiles are always available, even on a fresh install)
 
 This means:
 
@@ -148,7 +149,7 @@ Aliases are automatically loaded:
 ### Safety Options
 
 * **`-n`, `--dry-run`**
-  Preview actions without applying changes.
+  Strictly preview actions and log intended operations without mutating state.
 
 * **`-v`, `--verbose`**
   Show detailed execution logs.
@@ -175,17 +176,17 @@ All writes use `mktemp + mv` to ensure consistency.
 Profile state is atomically swapped.
 Explicit persistence guarantees may be expanded in future versions.
 
-### 3. Locking
+### 3. Cross-Platform Locking
 
-Prevents concurrent swaps using a lock directory with stale cleanup.
+Prevents concurrent swaps using a robust lock directory, featuring `mtime`-based stale lock detection compatible with both GNU and BSD `stat`.
 
-### 4. Smart Recovery
+### 4. Smart State Recovery (Fingerprinting)
 
-If state tracking is missing, aiswap can recover safely using existing state.
+If state tracking is lost but configs exist, aiswap uses file fingerprinting to deduce and restore the active profile.
 
-### 5. Backup System
+### 5. Auto-Backup System
 
-Unknown states are preserved in:
+Unrecognized manual edits to `config.yaml` are never overwritten blindly. They are preserved in:
 
 ```
 ~/.config/aichat/backups/
@@ -228,7 +229,7 @@ o stargate
 
 ```bash
 if [[ $- == *i* ]]; then
-    _aichat_swap alias rebuild
+    _aichat_swap alias rebuild 2>/dev/null
 fi
 ```
 
@@ -258,12 +259,13 @@ Independent project. Not affiliated with aichat.
 
 ## 🧭 Project Status
 
-**aiswap v1.2.2**
+**aiswap v1.2.3**
 
 Stable for:
 
-* Local profile switching
+* Local atomic profile switching
 * Alias-driven workflows
+* Cross-platform execution (WSL/Arch/macOS)
 
 Planned:
 
