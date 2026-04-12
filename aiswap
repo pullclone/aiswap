@@ -1,15 +1,16 @@
 ###############################################################################
-# _aichat_swap v1.2.3 (MU/TH/UR Integrated)
+# _aichat_swap v1.2.4
 #
 # Fixes & Features:
+# - FIXED: "Blank File" bug (adopts active config if target profile is 0-bytes)
+# - FIXED: "Dangling Lock" bug (removed shell EXIT traps for manual cleanup)
 # - Restores cross-platform robust stale lock detection (mtime-based)
 # - Fixes critical alias bootstrap bug (always sets `aiswap` and defaults)
-# - Restores config fingerprinting and auto-backup from v1.1.0
-# - Maintains v1.2.2 short flags and dynamic alias control plane
+# - Restores config fingerprinting and auto-backup
 # - Ensures 100% atomic swaps with mktemp + mv
 ###############################################################################
 _aichat_swap() {
-    local VERSION="1.2.3"
+    local VERSION="1.2.4"
 
     # Paths
     local BASE_DIR="${AICHAT_CONF_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/aichat}"
@@ -90,17 +91,13 @@ _aichat_swap() {
     }
 
     _rebuild_aliases() {
-        # 1. Base command must ALWAYS exist
         alias aiswap="_aichat_swap"
-
-        # 2. Map dynamic aliases
         if [[ -f "$ALIAS_FILE" ]]; then
             while read -r id name; do
                 [[ -z "$id" || -z "$name" ]] && continue
                 alias "$name"="_aichat_swap $id"
             done < "$ALIAS_FILE"
         else
-            # 3. Fallback to defaults if file isn't initialized yet
             local i
             for i in "${!IDS[@]}"; do
                 alias "${NAMES[$i]}"="_aichat_swap ${IDS[$i]}"
@@ -109,22 +106,18 @@ _aichat_swap() {
     }
 
     ###########################################################################
-    # Locking (Restored from 1.1.0 / Hardened)
+    # Locking & Cleanup
     ###########################################################################
     _acquire_lock() {
-        # Ensure base directory exists first so mkdir lock doesn't fail
         mkdir -p "$DIR" 2>/dev/null
-
         local retries=0 max=6 stale=30
         while (( retries < max )); do
             if mkdir "$LOCK_DIR" 2>/dev/null; then
                 return 0
             fi
 
-            # Check for stale lock
             local now mtime=0
             now=$(date +%s)
-
             if stat -c %Y "$LOCK_DIR" >/dev/null 2>&1; then
                 mtime=$(stat -c %Y "$LOCK_DIR")
             elif stat -f %m "$LOCK_DIR" >/dev/null 2>&1; then
@@ -145,7 +138,11 @@ _aichat_swap() {
 
     _cleanup() {
         [[ -n "$TMPFILE" && -f "$TMPFILE" ]] && rm -f "$TMPFILE" 2>/dev/null
-        $HAVE_LOCK && rmdir "$LOCK_DIR" 2>/dev/null
+        if $HAVE_LOCK; then
+            rmdir "$LOCK_DIR" 2>/dev/null
+            HAVE_LOCK=false
+        fi
+        trap - INT TERM 2>/dev/null
     }
 
     ###########################################################################
@@ -250,7 +247,7 @@ EOF
     esac
 
     ###########################################################################
-    # Swap Logic (Restored to 1.1.0 Standards)
+    # Swap Logic
     ###########################################################################
     local target="$cmd"
     local current=""
@@ -270,18 +267,18 @@ EOF
         return 0
     fi
 
-    # Dry-run hard stop to prevent actual mutation
     if $DRY_RUN; then
         _msg dry "Would lock, save current state, and swap to: $(_get_name "$target") ($target)"
         return 0
     fi
 
+    # Acquire Lock (Strict cleanup routing from here down)
     _acquire_lock || { _msg err "Lock failed (busy?)."; return 1; }
     HAVE_LOCK=true
-    trap '_cleanup' EXIT INT TERM
+    trap '_cleanup; return 1' INT TERM
 
     # ---------------------------------------------------------
-    # State Deduction & Backup (Restored from v1.1.0)
+    # State Deduction & Backup
     # ---------------------------------------------------------
     if [[ -z "$current" ]] && [[ -f "$DIR/config.yaml" ]]; then
         _msg warn "Unknown state. Fingerprinting..."
@@ -291,7 +288,7 @@ EOF
                 match_id="$id"; break
             fi
         done
-        
+
         if [[ -n "$match_id" ]]; then
             current="$match_id"
             echo "$current" > "$CURRENT_FILE"
@@ -304,7 +301,6 @@ EOF
         fi
     fi
 
-    # Save Current to Storage before swapping (In case of manual edits)
     if [[ -n "$current" ]]; then
         local storage_file="$DIR/$current.config.yaml"
         if ! cmp -s "$DIR/config.yaml" "$storage_file" 2>/dev/null; then
@@ -318,13 +314,28 @@ EOF
     local src="$DIR/$target.config.yaml"
     if [[ ! -f "$src" ]]; then
         _msg err "Missing profile: $src"
+        _cleanup
         return 1
     fi
 
-    TMPFILE=$(mktemp "$DIR/.tmp.XXXXXX") || return 1
+    # BUGFIX: Prevent 0-byte profile overrides
+    if [[ ! -s "$src" && -s "$DIR/config.yaml" ]]; then
+        _msg warn "Target profile [$target] is empty. Adopting active config data..."
+        cp -p "$DIR/config.yaml" "$src" 2>/dev/null
+    fi
+
+    TMPFILE=$(mktemp "$DIR/.tmp.XXXXXX") || {
+        _msg err "Failed to create temp file."
+        _cleanup
+        return 1
+    }
+
     cp -p "$src" "$TMPFILE"
     mv "$TMPFILE" "$DIR/config.yaml"
     echo "$target" > "$CURRENT_FILE"
 
     _msg ok "Switched → $(_get_name "$target")"
+
+    _cleanup
+    return 0
 }
