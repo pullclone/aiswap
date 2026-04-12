@@ -45,6 +45,7 @@ They are now:
 * **Stored as data**
 * **Editable at runtime**
 * **Automatically injected into your shell**
+* **Fully integrated** (Custom aliases appear natively in `aiswap list` and `status`)
 * **Guaranteed to load** (Default profiles are always available, even on a fresh install)
 
 This means:
@@ -192,6 +193,10 @@ Unrecognized manual edits to `config.yaml` are never overwritten blindly. They a
 ~/.config/aichat/backups/
 ```
 
+### 6. Shell Inoculation
+
+Core operations strictly use `command` to bypass interactive user aliases (like `alias mv='mv -i'`), ensuring reliable execution in heavily customized environments.
+
 ---
 
 ## 📂 Configuration Layout
@@ -259,7 +264,7 @@ Independent project. Not affiliated with aichat.
 
 ## 🧭 Project Status
 
-**aiswap v1.2.3**
+**aiswap v1.2.6**
 
 Stable for:
 
