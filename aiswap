@@ -1,16 +1,16 @@
 ###############################################################################
-# _aichat_swap v1.2.4
+# _aichat_swap v1.2.5
 #
 # Fixes & Features:
+# - NEW: Dynamic Alias Merging (custom aliases now show in 'list' and 'status')
 # - FIXED: "Blank File" bug (adopts active config if target profile is 0-bytes)
-# - FIXED: "Dangling Lock" bug (removed shell EXIT traps for manual cleanup)
+# - FIXED: "Dangling Lock" bug (strict manual cleanup routing)
+# - FIXED: `init` no longer creates 0-byte files, allowing aichat to scaffold
 # - Restores cross-platform robust stale lock detection (mtime-based)
-# - Fixes critical alias bootstrap bug (always sets `aiswap` and defaults)
-# - Restores config fingerprinting and auto-backup
 # - Ensures 100% atomic swaps with mktemp + mv
 ###############################################################################
 _aichat_swap() {
-    local VERSION="1.2.4"
+    local VERSION="1.2.5"
 
     # Paths
     local BASE_DIR="${AICHAT_CONF_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/aichat}"
@@ -29,6 +29,43 @@ _aichat_swap() {
     local VERBOSE=false
     local TMPFILE=""
     local HAVE_LOCK=false
+
+    # Dynamically merge file-based aliases into engine memory (Bash 3.2 Portable)
+    _load_profiles() {
+        [[ -f "$ALIAS_FILE" ]] || return 0
+        local new_ids=() new_names=()
+        local i j found
+
+        # Load defaults
+        for i in "${!IDS[@]}"; do
+            new_ids+=("${IDS[$i]}")
+            new_names+=("${NAMES[$i]}")
+        done
+
+        # Merge overrides / additions
+        while read -r id name; do
+            # Skip empty lines or comments
+            [[ -z "$id" || -z "$name" || "$id" == \#* ]] && continue
+            found=false
+            for j in "${!new_ids[@]}"; do
+                if [[ "${new_ids[$j]}" == "$id" ]]; then
+                    new_names[$j]="$name"
+                    found=true
+                    break
+                fi
+            done
+            if ! $found; then
+                new_ids+=("$id")
+                new_names+=("$name")
+            fi
+        done < "$ALIAS_FILE"
+
+        IDS=("${new_ids[@]}")
+        NAMES=("${new_names[@]}")
+    }
+    
+    # Initialize engine state
+    _load_profiles
 
     ###########################################################################
     # Helpers
@@ -92,17 +129,11 @@ _aichat_swap() {
 
     _rebuild_aliases() {
         alias aiswap="_aichat_swap"
-        if [[ -f "$ALIAS_FILE" ]]; then
-            while read -r id name; do
-                [[ -z "$id" || -z "$name" ]] && continue
-                alias "$name"="_aichat_swap $id"
-            done < "$ALIAS_FILE"
-        else
-            local i
-            for i in "${!IDS[@]}"; do
-                alias "${NAMES[$i]}"="_aichat_swap ${IDS[$i]}"
-            done
-        fi
+        local i
+        # Since _load_profiles already merged defaults and file data, we just map them all
+        for i in "${!IDS[@]}"; do
+            alias "${NAMES[$i]}"="_aichat_swap ${IDS[$i]}"
+        done
     }
 
     ###########################################################################
@@ -240,8 +271,6 @@ EOF
             return ;;
         init)
             _exec mkdir -p "$DIR" "$BACKUP_DIR"
-            touch "$DIR/config.yaml"
-            for id in "${IDS[@]}"; do touch "$DIR/$id.config.yaml"; done
             _msg ok "Initialization complete."
             return ;;
     esac
