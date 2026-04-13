@@ -1,18 +1,17 @@
 ###############################################################################
-# _aichat_swap v1.2.6
+# _aichat_swap v1.2.7
 #
 # Fixes & Features:
-# - FIXED: "Alias Contamination" bug (inoculates core utilities with `command`
-#          to prevent user aliases like `rg` or `mv -i` from breaking logic)
+# - FIXED: "Init Regression" (safely scaffolds profile configs without overwriting)
+# - FIXED: "ID Parsing Bug" (supports hyphens/underscores in profile IDs)
+# - RESTORED: Robust `diff` (arg validation, file checks, GNU/BSD color support)
+# - RESTORED: GUI Editor fallbacks (xdg-open, open) and `cat` failsafe
+# - FIXED: "Alias Contamination" bug (inoculated `command` prefixes)
 # - NEW: Dynamic Alias Merging (custom aliases now show in 'list' and 'status')
-# - FIXED: "Blank File" bug (adopts active config if target profile is 0-bytes)
-# - FIXED: "Dangling Lock" bug (strict manual cleanup routing)
-# - FIXED: `init` no longer creates 0-byte files, allowing aichat to scaffold
-# - Restores cross-platform robust stale lock detection (mtime-based)
-# - Ensures 100% atomic swaps with mktemp + mv
+# - Ensures 100% atomic swaps with mktemp + mv and robust mtime locking
 ###############################################################################
 _aichat_swap() {
-    local VERSION="1.2.6"
+    local VERSION="1.2.7"
 
     # Paths
     local BASE_DIR="${AICHAT_CONF_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/aichat}"
@@ -64,7 +63,7 @@ _aichat_swap() {
         IDS=("${new_ids[@]}")
         NAMES=("${new_names[@]}")
     }
-    
+
     _load_profiles
 
     ###########################################################################
@@ -81,19 +80,33 @@ _aichat_swap() {
             dry) color=5; sym="🔍 " ;;
         esac
         if [[ -t $out ]] && command -v tput >/dev/null 2>&1; then
-            printf "%b\n" "$(tput setaf $color)${sym}$*$(tput sgr0)" >&$out
+            printf "%b\n" "$(command tput setaf $color)${sym}$*$(command tput sgr0)" >&$out
         else
             printf "%s\n" "${sym}$*" >&$out
         fi
     }
 
+    _exec() {
+        local cmd="$1"; shift
+        if $DRY_RUN || $VERBOSE; then
+            local debug="$cmd"
+            for arg in "$@"; do debug="$debug $(printf "%q" "$arg")"; done
+            $DRY_RUN && _msg dry "[DRY-RUN] $debug" && return 0
+            _msg info "$debug"
+        fi
+        "$cmd" "$@"
+    }
+
     _get_editor() {
         [[ -n "$EDITOR" ]] && { echo "$EDITOR"; return; }
         local editors=(code subl micro nano vim vi)
+        local ed
         for ed in "${editors[@]}"; do
             command -v "$ed" >/dev/null 2>&1 && { echo "$ed"; return; }
         done
-        echo "vi"
+        if command -v xdg-open >/dev/null 2>&1; then echo "xdg-open"; return; fi
+        if command -v open >/dev/null 2>&1; then echo "open"; return; fi
+        echo "cat"
     }
 
     _get_name() {
@@ -222,7 +235,6 @@ EOF
                 _msg ok "Alias added: $4 → $3"
                 ;;
             remove)
-                # Inoculated grep to bypass 'rg' user aliases
                 command grep -vE "[[:space:]]$3$" "$ALIAS_FILE" | _alias_write
                 _msg ok "Alias removed: $3"
                 ;;
@@ -239,7 +251,7 @@ EOF
         help) _show_help; return ;;
         list)
             local current=""
-            [[ -f "$CURRENT_FILE" ]] && current=$(head -n1 "$CURRENT_FILE" 2>/dev/null | tr -cd '[:alnum:]')
+            [[ -f "$CURRENT_FILE" ]] && current=$(command head -n1 "$CURRENT_FILE" 2>/dev/null | command tr -d '\r\n')
             for i in "${!IDS[@]}"; do
                 local mark=" "
                 [[ "${IDS[$i]}" == "$current" ]] && mark="*"
@@ -247,16 +259,30 @@ EOF
             done
             return ;;
         status)
-            [[ -f "$CURRENT_FILE" ]] && _msg info "Active: $(_get_name "$(command cat "$CURRENT_FILE")")"
+            [[ -f "$CURRENT_FILE" ]] && _msg info "Active: $(_get_name "$(command cat "$CURRENT_FILE" 2>/dev/null | command tr -d '\r\n')")"
             return ;;
         edit)
             "$(_get_editor)" "$DIR/config.yaml"
             return ;;
         diff)
-            command diff -u "$DIR/config.yaml" "$DIR/$2.config.yaml"
-            return ;;
+            local target_id="$2"
+            [[ -z "$target_id" ]] && { _msg err "Usage: diff <profile_id>"; return 1; }
+            if ! command -v diff >/dev/null 2>&1; then _msg err "'diff' command not found."; return 1; fi
+
+            local diff_opts=(-u)
+            if command diff --color=auto /dev/null /dev/null >/dev/null 2>&1; then
+                diff_opts+=("--color=auto")
+            fi
+
+            if [[ ! -f "$DIR/$target_id.config.yaml" ]]; then _msg err "Profile '$target_id' not found."; return 1; fi
+            command diff "${diff_opts[@]}" "$DIR/config.yaml" "$DIR/$target_id.config.yaml"
+            return 0 ;;
         init)
             command mkdir -p "$DIR" "$BACKUP_DIR"
+            [[ ! -f "$DIR/config.yaml" ]] && command touch "$DIR/config.yaml"
+            for id in "${IDS[@]}"; do
+                [[ ! -f "$DIR/$id.config.yaml" ]] && command touch "$DIR/$id.config.yaml"
+            done
             _msg ok "Initialization complete."
             return ;;
     esac
@@ -266,7 +292,7 @@ EOF
     ###########################################################################
     local target="$cmd"
     local current=""
-    [[ -f "$CURRENT_FILE" ]] && current=$(head -n1 "$CURRENT_FILE" 2>/dev/null | tr -cd '[:alnum:]')
+    [[ -f "$CURRENT_FILE" ]] && current=$(command head -n1 "$CURRENT_FILE" 2>/dev/null | command tr -d '\r\n')
 
     local valid_target=false i
     for i in "${!IDS[@]}"; do [[ "$target" == "${IDS[$i]}" ]] && valid_target=true && break; done
