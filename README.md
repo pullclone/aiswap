@@ -264,7 +264,7 @@ Independent project. Not affiliated with aichat.
 
 ## 🧭 Project Status
 
-**aiswap v1.2.6**
+**aiswap v1.2.7**
 
 Stable for:
 
