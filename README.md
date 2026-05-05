@@ -1,279 +1,159 @@
-# 🔄 aiswap
+# aiswap
 
-### The Intelligent Profile Switcher
+`aiswap` is a standalone Bash utility for switching `aichat` config profiles without editing `config.yaml` by hand.
 
-**aiswap** is a utility that lets you instantly switch between different AI personalities and service configurations (Claude, Gemini, Mistral, OpenAI, etc.) without manually editing config files.
+The implementation is sourceable from `.bashrc`, `.bash_profile`, or another shell file and targets broad Bash compatibility across Linux, WSL, macOS, and BSD-style systems where practical.
 
-It is designed to be:
+## Install
 
-* **Invisible when it works**
-* **Informative when it doesn’t**
-* **Safe by default**
+Copy or clone this repo, then source `aiswap.sh` from your Bash startup file:
 
----
+```bash
+# ~/.bashrc or ~/.bash_profile
+source /path/to/aiswap/aiswap.sh
+```
 
-## 🚀 Quick Start
+Reload the shell:
 
-Once initialized, you can switch profiles using simple commands:
+```bash
+source ~/.bashrc
+```
+
+The file defines:
+
+```bash
+_aichat_swap
+alias aiswap='_aichat_swap'
+```
+
+It also defines an `aiswap` function so non-interactive Bash scripts can call `aiswap` even when alias expansion is disabled.
+
+## Config Directory
+
+By default, aiswap uses:
+
+```bash
+${AICHAT_CONF_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/aichat}
+```
+
+Files live under that directory:
+
+```text
+config.yaml              active aichat config
+current                  current profile marker
+backups/                 unknown-state backups
+.swap.lock.d/            transient lock directory
+aliases                  optional custom alias data
+<id>.config.yaml         stored profile config
+```
+
+`aiswap init` creates only the config directory and `backups/`. It does not create empty `config.yaml` or empty profile files.
+
+## Default Profiles
+
+```text
+c -> altostrat
+g -> alpha
+m -> lechat
+o -> stargate
+```
+
+Create the profile files you actually use:
+
+```bash
+aiswap init
+cp ~/.config/aichat/config.yaml ~/.config/aichat/c.config.yaml
+cp ~/.config/aichat/config.yaml ~/.config/aichat/g.config.yaml
+```
+
+Then switch:
 
 ```bash
 aiswap c
 aiswap g
-aiswap m
-aiswap o
 ```
 
-Or—more ergonomically—via aliases:
-
-```bash
-alpha
-stargate
-```
+## Commands
 
 ```text
-✅ Switched: alpha → stargate
-```
+aiswap list
+aiswap ls
+aiswap -l
 
----
+aiswap status
+aiswap stat
+aiswap -s
 
-## ✨ Dynamic Alias System
+aiswap diff <id>
+aiswap -d <id>
 
-Aliases are no longer hardcoded in your shell.
+aiswap edit
+aiswap init
 
-They are now:
-
-* **Stored as data**
-* **Editable at runtime**
-* **Automatically injected into your shell**
-* **Fully integrated** (Custom aliases appear natively in `aiswap list` and `status`)
-* **Guaranteed to load** (Default profiles are always available, even on a fresh install)
-
-This means:
-
-* No `.bashrc` editing
-* Minimal reload friction (instant with `aiswap alias rebuild`)
-* Fully portable alias configs
-
----
-
-## 🧠 Alias Management
-
-### View aliases
-
-```bash
 aiswap alias list
-```
-
-### Add a new alias
-
-```bash
-aiswap alias add g fast
-```
-
-Now:
-
-```bash
-fast
-```
-
-### Remove an alias
-
-```bash
-aiswap alias remove fast
-```
-
-### Edit aliases manually
-
-```bash
+aiswap alias add <profile_id> <alias_name>
+aiswap alias remove <alias_name>
 aiswap alias edit
-```
-
-### Reload aliases into current shell
-
-```bash
 aiswap alias rebuild
+
+aiswap help
+aiswap -h
+
+aiswap -n <id>
+aiswap --dry-run <id>
+aiswap -v <id>
+aiswap --verbose <id>
 ```
 
-Aliases are automatically loaded:
+## Aliases
 
-* On shell startup (via `.bashrc`)
-* Or instantly with `aiswap alias rebuild`
+Custom aliases are stored as data in:
 
----
-
-## 🛠️ Commands & Options
-
-### Managing State
-
-* **`aiswap status` / `aiswap -s`**
-  Show the active profile.
-
-* **`aiswap list` / `aiswap -l`**
-  List all profiles (`*` = active).
-
-* **`aiswap diff <id>` / `aiswap -d <id>`**
-  Compare current config vs another profile.
-
----
-
-### Setup & Editing
-
-* **`aiswap init`**
-  Initialize config directory and profiles.
-
-* **`aiswap edit`**
-  Open active config in your preferred editor
-  (`code → subl → micro → nano → vim → vi`)
-
----
-
-### Alias Control Plane
-
-* **`aiswap alias list`**
-* **`aiswap alias add <id> <name>`**
-* **`aiswap alias remove <name>`**
-* **`aiswap alias edit`**
-* **`aiswap alias rebuild`**
-
----
-
-### Help & Info
-
-* **`aiswap help` / `aiswap -h`**
-  Show full usage and command reference.
-
-* **`aiswap version`**
-  Show current version.
-
----
-
-### Safety Options
-
-* **`-n`, `--dry-run`**
-  Strictly preview actions and log intended operations without mutating state.
-
-* **`-v`, `--verbose`**
-  Show detailed execution logs.
-
-Example:
-
-```bash
-aiswap -n g
-aiswap -v c
+```text
+${AICHAT_CONF_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/aichat}/aliases
 ```
 
----
+Format:
 
-## 🛡️ Safety Features
-
-**aiswap** is built to prevent state corruption and data loss.
-
-### 1. Atomic Operations
-
-All writes use `mktemp + mv` to ensure consistency.
-
-### 2. Controlled State Persistence
-
-Profile state is atomically swapped.
-Explicit persistence guarantees may be expanded in future versions.
-
-### 3. Cross-Platform Locking
-
-Prevents concurrent swaps using a robust lock directory, featuring `mtime`-based stale lock detection compatible with both GNU and BSD `stat`.
-
-### 4. Smart State Recovery (Fingerprinting)
-
-If state tracking is lost but configs exist, aiswap uses file fingerprinting to deduce and restore the active profile.
-
-### 5. Auto-Backup System
-
-Unrecognized manual edits to `config.yaml` are never overwritten blindly. They are preserved in:
-
-```
-~/.config/aichat/backups/
-```
-
-### 6. Shell Inoculation
-
-Core operations strictly use `command` to bypass interactive user aliases (like `alias mv='mv -i'`), ensuring reliable execution in heavily customized environments.
-
----
-
-## 📂 Configuration Layout
-
-```
-~/.config/aichat/
-├── config.yaml
-├── c.config.yaml
-├── g.config.yaml
-├── m.config.yaml
-├── o.config.yaml
-├── aliases
-├── current
-└── backups/
-```
-
----
-
-### Alias File Format
-
-```
+```text
 <profile_id> <alias_name>
 ```
 
 Example:
 
-```
-g alpha
-o stargate
+```bash
+aiswap alias add g fast
+aiswap alias rebuild
+fast
 ```
 
----
+Alias loading always starts with the defaults, then merges the alias file. Existing profile ids are overridden by entries in the file and new ids are added.
 
-## ⚙️ Shell Integration
+Validation rules:
+
+```text
+profile id:  ^[A-Za-z0-9][A-Za-z0-9_.-]*$
+alias name:  ^[A-Za-z_][A-Za-z0-9_-]*$
+```
+
+## Safety Behavior
+
+aiswap is hardened for interactive shells that define aliases such as `cp -i`, `cat=bat`, or `grep=rg`; internal file operations use `command` to avoid those aliases.
+
+Profile switching uses a lock directory created with `mkdir`, retries briefly, and reclaims stale locks using GNU `stat -c %Y` or BSD `stat -f %m`.
+
+When the current marker is missing or invalid, aiswap fingerprints the active `config.yaml` against known profile files with `cmp`. If no match is found, it backs up the active config to `backups/unknown_<timestamp>.yaml` and prunes backups older than seven days.
+
+Before switching away from a known current profile, changed active config is saved back to `<current>.config.yaml`. The target profile is copied to a temporary file inside the config directory, moved into `config.yaml`, and then the current marker is updated.
+
+If the target profile file is missing, switching fails. If the target profile file exists but is empty while the active config is non-empty, aiswap adopts the active config into that target profile before swapping.
+
+## Validation
+
+Run the standalone validator:
 
 ```bash
-if [[ $- == *i* ]]; then
-    _aichat_swap alias rebuild 2>/dev/null
-fi
+bash scripts/validate.sh
 ```
 
----
-
-## 🧩 Design Philosophy
-
-| Layer    | Responsibility      |
-| -------- | ------------------- |
-| Profiles | Configuration state |
-| Aliases  | User interface      |
-| aiswap   | Orchestration       |
-
----
-
-## ❤️ Built for aichat
-
-Designed to pair with:
-
-👉 [https://github.com/sigoden/aichat](https://github.com/sigoden/aichat)
-
----
-
-## ⚠️ Disclaimer
-
-Independent project. Not affiliated with aichat.
-
-## 🧭 Project Status
-
-**aiswap v1.2.7**
-
-Stable for:
-
-* Local atomic profile switching
-* Alias-driven workflows
-* Cross-platform execution (WSL/Arch/macOS)
-
-Planned:
-
-* Cross-machine sync
-* Remote reconciliation
-* Validation layer
+The validator uses a temporary `AICHAT_CONF_DIR` and does not touch the real `~/.config/aichat`.
